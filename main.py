@@ -41,34 +41,37 @@ async def log_energy(request: Request):
 # --- 3. THE BRAIN (Linear Regression Prediction) ---
 @app.get("/predict")
 def predict_energy(session_id: str):
-    conn = sqlite3.connect("ecotrace.db")
-    # Load history for this specific session
-    df = pd.read_sql_query("SELECT id, power_w FROM energy_logs WHERE session_id = ?", conn)
-    conn.close()
-    
-    if len(df) < 10:
-        return {"error": "Need at least 10 data points to predict. Keep training!"}
+    try:
+        conn = sqlite3.connect("ecotrace.db")
+        df = pd.read_sql_query("SELECT id, power_w FROM energy_logs WHERE session_id = ?", conn)
+        conn.close()
+        
+        if len(df) < 5: # Lowered requirement to 5 for faster testing
+            return {"error": f"Need more data. Currently have {len(df)} points."}
 
-    # Prepare ML Model
-    X = np.array(range(len(df))).reshape(-1, 1) # Time steps
-    y = df['power_w'].values                   # Power recorded
-    
-    model = LinearRegression()
-    model.fit(X, y)
-    
-    # Predict power 1 hour (60 mins) into the future
-    future_step = len(df) + 60 
-    predicted_power = model.predict([[future_step]])[0]
-    
-    # Carbon Calculation (Avg 475g CO2 per kWh)
-    avg_power = df['power_w'].mean()
-    est_kwh_per_hour = avg_power / 1000
-    carbon_per_hour = est_kwh_per_hour * 475
+        # Prepare ML Model
+        X = np.array(range(len(df))).reshape(-1, 1)
+        y = df['power_w'].values
+        
+        # SAFETY: Check if all power values are the same (prevents math crash)
+        if np.all(y == y[0]):
+            predicted_power = y[0]
+        else:
+            model = LinearRegression()
+            model.fit(X, y)
+            future_step = len(df) + 60 
+            predicted_power = model.predict([[future_step]])[0]
+        
+        avg_power = df['power_w'].mean()
+        carbon = (avg_power / 1000) * 475
 
-    return {
-        "session": session_id,
-        "samples_collected": len(df),
-        "current_avg_watts": round(avg_power, 2),
-        "predicted_watts_next_hour": round(predicted_power, 2),
-        "est_carbon_grams_per_hour": round(carbon_per_hour, 2)
-    }
+        return {
+            "session": session_id,
+            "samples": len(df),
+            "current_avg_w": round(avg_power, 2),
+            "predicted_w": round(predicted_power, 2),
+            "carbon_g_hr": round(carbon, 2)
+        }
+    except Exception as e:
+        # This prevents the "Internal Server Error" screen
+        return {"error": "Math Processing Error", "details": str(e)}
