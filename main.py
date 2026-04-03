@@ -37,6 +37,17 @@ async def log_energy(request: Request):
     conn.commit()
     conn.close()
     return {"status": "saved", "power": payload['power_w']}
+# Add this near your other routes in main.py
+@app.get("/active_devices")
+def get_active_devices():
+    try:
+        conn = sqlite3.connect("ecotrace.db")
+        # Get unique session IDs from the last 24 hours
+        df = pd.read_sql_query("SELECT DISTINCT session_id FROM energy_logs", conn)
+        conn.close()
+        return {"devices": df['session_id'].tolist()}
+    except Exception as e:
+        return {"devices": [], "error": str(e)}
 
 # --- 3. THE BRAIN (Linear Regression Prediction) ---
 @app.get("/predict")
