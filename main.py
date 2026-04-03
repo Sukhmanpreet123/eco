@@ -43,17 +43,16 @@ async def log_energy(request: Request):
 def predict_energy(session_id: str):
     try:
         conn = sqlite3.connect("ecotrace.db")
-        df = pd.read_sql_query("SELECT id, power_w FROM energy_logs WHERE session_id = ?", conn)
+        # FIX: params must be a tuple (session_id,)
+        df = pd.read_sql_query("SELECT id, power_w FROM energy_logs WHERE session_id = ?", conn, params=(session_id,))
         conn.close()
         
-        if len(df) < 5: # Lowered requirement to 5 for faster testing
+        if len(df) < 5:
             return {"error": f"Need more data. Currently have {len(df)} points."}
 
-        # Prepare ML Model
         X = np.array(range(len(df))).reshape(-1, 1)
         y = df['power_w'].values
         
-        # SAFETY: Check if all power values are the same (prevents math crash)
         if np.all(y == y[0]):
             predicted_power = y[0]
         else:
@@ -68,10 +67,9 @@ def predict_energy(session_id: str):
         return {
             "session": session_id,
             "samples": len(df),
-            "current_avg_w": round(avg_power, 2),
-            "predicted_w": round(predicted_power, 2),
-            "carbon_g_hr": round(carbon, 2)
+            "current_avg_w": round(float(avg_power), 2),
+            "predicted_w": round(float(predicted_power), 2),
+            "carbon_g_hr": round(float(carbon), 2)
         }
     except Exception as e:
-        # This prevents the "Internal Server Error" screen
         return {"error": "Math Processing Error", "details": str(e)}
