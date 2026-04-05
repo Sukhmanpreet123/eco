@@ -4,3 +4,6 @@ requests
 pandas
 scikit-learn
 numpy
+streamlit
+streamlit-autorefresh
+plotly
