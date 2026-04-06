@@ -782,7 +782,7 @@ async function fetchAndUpdate() {{
 
     const anomList=anom.anomalies||[];
     if(isLive&&anomList.length>0) {{
-      anomalyData=anomList.map(a=>({timeStr:a.timestamp?a.timestamp.slice(-8):null,watts:parseFloat(a.power_w)||0})).filter(a=>a.timeStr);
+      anomalyData=anomList.map(a=>({{timeStr:a.timestamp?a.timestamp.slice(-8):null,watts:parseFloat(a.power_w)||0}})).filter(a=>a.timeStr);
     }} else if(!isLive) anomalyData=[];
     const anomCap=document.getElementById("anomaly-caption");
     anomCap.textContent=(isLive&&anomalyData.length>0)?"⚠️ "+anomalyData.length+" anomaly event(s) — red × markers on chart.":"";
