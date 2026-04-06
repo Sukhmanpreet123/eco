@@ -156,10 +156,17 @@ async def log_energy(request: Request):
 @app.get("/active_devices")
 def get_active_devices():
     try:
-        conn  = get_conn()
-        rows  = conn.execute(
-            "SELECT DISTINCT session_id FROM energy_logs ORDER BY session_id"
-        ).fetchall()
+        conn = get_conn()
+        # Only return sessions that sent a reading in the last 30 minutes.
+        # This means once end_session() is called and the agent stops,
+        # the session disappears from the dashboard dropdown after 30 min.
+        # Change the interval value to adjust how long ended sessions linger.
+        cutoff = (datetime.datetime.now() -
+                  datetime.timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+        rows = conn.execute(
+            "SELECT DISTINCT session_id FROM energy_logs "
+            "WHERE timestamp >= ? ORDER BY session_id",
+            (cutoff,)).fetchall()
         conn.close()
         return {"devices": [r["session_id"] for r in rows]}
     except Exception as e:
@@ -176,11 +183,27 @@ def predict_energy(session_id: str):
         conn.close()
         if len(df) < 5:
             return {"error": f"Need more data. Have {len(df)} points."}
-        X = np.arange(len(df)).reshape(-1, 1)
-        y = df["power_w"].values
-        pred = float(y[0]) if np.all(y == y[0]) else float(
-            LinearRegression().fit(X, y).predict([[len(df) + 60]])[0])
-        avg_w = float(y.mean())
+
+        # Use only the most recent 20 readings for regression.
+        # Using all-time readings causes the trend line to extrapolate
+        # wildly (e.g. negative watts) when the session just started
+        # with a spike and then settled down.
+        recent = df.tail(20)
+        X      = np.arange(len(recent)).reshape(-1, 1)
+        y      = recent["power_w"].values
+        avg_w  = float(y.mean())
+
+        if np.all(y == y[0]) or len(recent) < 3:
+            # Constant load or too few points — forecast = current avg
+            pred = avg_w
+        else:
+            raw_pred = float(
+                LinearRegression().fit(X, y).predict([[len(recent) + 60]])[0])
+            # Clamp: predicted watts must be ≥ 0 and ≤ 3× current average.
+            # This prevents nonsensical negative or runaway values when
+            # the regression catches a short-lived spike or drop.
+            pred = max(0.0, min(raw_pred, avg_w * 3.0))
+
         return {
             "session":       session_id,
             "samples":       len(df),
