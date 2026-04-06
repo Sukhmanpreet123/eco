@@ -555,10 +555,11 @@ def budget_check(session_id: str, budget_g: float = 100.0):
         rate        = (avg_w / 1000) * GRID_INTENSITY   # g CO₂ per hr
         co2_so_far  = round(rate * elapsed_hrs, 4)
 
-        # B5: project remaining time properly
-        budget_hrs  = budget_g / rate if rate > 0 else float("inf")
-        remaining   = max(budget_hrs - elapsed_hrs, 0.5)
-        projected   = round(co2_so_far + rate * remaining, 2)
+        # Fixed: use a 1-hour lookahead from now.
+        # "At the current rate, how much CO₂ will I have 1 hour from now?"
+        # This avoids the mathematical identity: budget_hrs = budget_g/rate
+        # → projected = co2_so_far + rate*(budget_g/rate) = budget_g at startup.
+        projected   = round(co2_so_far + rate * 1.0, 2)
 
         best_co2 = float(past["total_co2_g"].min()) if not past.empty else None
         best_acc = float(past["final_accuracy"].max()) if not past.empty else None
