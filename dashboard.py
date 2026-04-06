@@ -66,35 +66,39 @@ section[data-testid="stSidebar"] [data-testid="stSlider"] [role="slider"] {
     background: #10b981 !important;
 }
 
-/* ── Tabs ── */
+/* ── Tabs (Mockup Design) ── */
 [data-testid="stTabs"] {
-    padding-top: 10px;
+    padding-top: 5px !important;
 }
 [data-testid="stTabs"] [role="tablist"] {
     background: transparent !important;
     border: none !important;
-    padding: 2px 0 6px 0 !important;
-    gap: 8px;
-    margin-bottom: 24px;
+    padding: 0 0 10px 0 !important;
+    gap: 8px !important;
+    margin-bottom: 20px !important;
 }
 [data-testid="stTabs"] [role="tab"] {
-    background: #1e293b !important;
-    border: 1px solid #334155 !important;
-    border-radius: 8px !important;
+    background: transparent !important;
+    border: 1px solid transparent !important;
+    border-radius: 100px !important;
     color: #94a3b8 !important;
     font-size: 14px !important;
     font-weight: 600 !important;
     padding: 8px 16px !important;
+    min-height: 38px !important;
+    margin-top: 5px !important; /* Forces it down from clipping */
     transition: all 0.2s ease !important;
 }
 [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
-    background: rgba(16,185,129,0.15) !important;
-    border-color: #10b981 !important;
-    color: #10b981 !important;
+    background: #f8fafc !important; /* White pill for active tab like mockup */
+    border-color: #f8fafc !important;
+    color: #020617 !important; /* Very dark text */
 }
 [data-testid="stTabs"] [role="tab"]:hover {
     color: #f1f5f9 !important;
-    border-color: #475569 !important;
+}
+[data-testid="stTabs"] [role="tab"][aria-selected="true"]:hover {
+    color: #020617 !important;
 }
 /* Hide tab underline bar */
 [data-testid="stTabs"] [role="tabpanel"] { border: none !important; }
