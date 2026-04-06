@@ -312,20 +312,34 @@ async def save_fingerprint(request: Request):
     grade = compute_grade(total_co2_g, wasted_co2_g, fp.get("final_accuracy"))
 
     # ── Anomaly detection ──────────────────────────────────
+    # Guard: only run IsolationForest when there is genuine variance.
+    # contamination=0.1 always flags 10% of readings as outliers,
+    # so on a flat idle signal (all readings ~4W) it produces dozens
+    # of false positives. We require BOTH:
+    #   1. std_dev >= 2W  (there is real spread in the data)
+    #   2. peak >= 1.5 × median  (there are actual spikes)
     if len(df_logs) >= 10:
-        iso   = IsolationForest(contamination=0.1, random_state=42)
-        preds = iso.fit_predict(df_logs[["power_w"]])
-        base  = float(df_logs["power_w"].median())
-        for i, pred in enumerate(preds):
-            if pred == -1:
-                row = df_logs.iloc[i]
-                conn.execute(
-                    "INSERT INTO anomalies "
-                    "(session_id,timestamp,power_w,baseline_w,note) VALUES (?,?,?,?,?)",
-                    (sid, row["timestamp"], float(row["power_w"]),
-                     base, "IsolationForest spike"))
-                append_audit(conn, sid, "anomaly_detected",
-                             {"power_w": float(row["power_w"]), "baseline_w": base})
+        pwr      = df_logs["power_w"].values
+        pwr_std  = float(np.std(pwr))
+        pwr_med  = float(np.median(pwr))
+        pwr_peak = float(np.max(pwr))
+        has_spikes = (pwr_std >= 2.0) and (pwr_peak >= pwr_med * 1.5)
+
+        if has_spikes:
+            iso   = IsolationForest(contamination=0.1, random_state=42)
+            preds = iso.fit_predict(df_logs[["power_w"]])
+            for i, pred in enumerate(preds):
+                if pred == -1:
+                    row = df_logs.iloc[i]
+                    conn.execute(
+                        "INSERT INTO anomalies "
+                        "(session_id,timestamp,power_w,baseline_w,note) VALUES (?,?,?,?,?)",
+                        (sid, row["timestamp"], float(row["power_w"]),
+                         pwr_med, "IsolationForest spike"))
+                    append_audit(conn, sid, "anomaly_detected",
+                                 {"power_w": float(row["power_w"]),
+                                  "baseline_w": pwr_med,
+                                  "std_dev": round(pwr_std, 2)})
 
     # ── SLA check ──────────────────────────────────────────
     sla = conn.execute(

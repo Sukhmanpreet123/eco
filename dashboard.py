@@ -390,10 +390,10 @@ const INTERVAL = 5000;  // 5 seconds
 // ── State ───────────────────────────────────────────────────
 let powerHistory   = [];   // {{time, watts}}
 let prevWatts      = null; // D7: track previous reading for delta
-let anomalyTimes   = [];   // D3: list of timestamps with anomalies
-let anomalyWatts   = [];   // D3: watts at anomaly timestamps
+let anomalyData    = [];   // D3: {{timeStr, watts}} — timestamp-matched anomalies
 let dnaFetched     = false;
 let fpFetched      = false;
+let wasLive        = false; // track live→ended transition
 
 // ── Helpers ─────────────────────────────────────────────────
 function fmt(val, unit="", dec=2) {{
@@ -472,20 +472,21 @@ function drawChart() {{
     ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
   }});
 
-  // D3: anomaly X markers — red crosses at anomaly positions
-  if (anomalyWatts.length > 0 && powerHistory.length > 1) {{
+  // D3: anomaly X markers — only when LIVE, matched by time string
+  if (anomalyData.length > 0 && powerHistory.length > 1) {{
     ctx.strokeStyle = "#e74c3c";
     ctx.lineWidth   = 2;
-    anomalyWatts.forEach(aw => {{
-      // Find the closest power history point by watt value
-      let closestIdx = 0;
-      let closestDiff = Infinity;
+    anomalyData.forEach(ad => {{
+      // Match anomaly to chart point by time prefix (HH:MM)
+      const anomHHMM = ad.timeStr ? ad.timeStr.slice(0, 5) : null;
+      if (!anomHHMM) return;
+      let matchIdx = -1;
       powerHistory.forEach((p, i) => {{
-        const diff = Math.abs(p.watts - aw);
-        if (diff < closestDiff) {{ closestDiff = diff; closestIdx = i; }}
+        if (p.time && p.time.slice(0, 5) === anomHHMM) matchIdx = i;
       }});
-      const x = padL + (closestIdx / (powerHistory.length - 1)) * chartW;
-      const y = padT + chartH - ((aw - minW) / rangeW) * chartH;
+      if (matchIdx < 0) return;  // anomaly not in current window — skip
+      const x = padL + (matchIdx / (powerHistory.length - 1)) * chartW;
+      const y = padT + chartH - ((ad.watts - minW) / rangeW) * chartH;
       const r = 6;
       ctx.beginPath();
       ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r);
@@ -540,21 +541,28 @@ function renderFPTable(runs) {{
   document.getElementById("fp-table").innerHTML = html;
 }}
 
-// ── One-shot DNA match (called when enough history) ──────────
-// D4: call /dna/match and show result in banner-dna
-async function fetchDNAMatch() {{
-  if (dnaFetched || powerHistory.length < 5) return;
+// ── One-shot DNA match — only fires when session is LIVE ─────
+// D4: only match current readings to past runs when actively training.
+// If session is ENDED, the current readings are idle (not training)
+// and matching them against your own just-completed run is misleading.
+async function fetchDNAMatch(live) {{
+  if (!live) {{ hideBanner("banner-dna"); return; }}
+  if (dnaFetched || powerHistory.length < 10) return;
+  // Only match if power readings show actual compute (not flat idle)
+  const watts  = powerHistory.map(p => p.watts);
+  const maxW   = Math.max(...watts);
+  const minW   = Math.min(...watts);
+  if (maxW - minW < 2.0) return;  // flat idle signal — skip DNA match
   try {{
-    const powers = powerHistory.map(p => p.watts);
     const r = await fetch(SERVER + "/dna/match", {{
       method: "POST",
       headers: {{"Content-Type": "application/json"}},
-      body: JSON.stringify({{powers}})
+      body: JSON.stringify({{powers: watts}})
     }});
     const d = await r.json();
     if (d.prediction) {{
       setBanner("banner-dna", "🧬 " + d.prediction, "blue");
-      dnaFetched = true;  // show once per page load
+      dnaFetched = true;
     }}
   }} catch(e) {{}}
 }}
@@ -604,6 +612,17 @@ async function fetchAndUpdate() {{
     // ── Session live/ended detection ─────────────────────────
     const activeDevices = active.devices || [];
     const isLive = activeDevices.includes(SESSION) && !pred.error;
+
+    // When session transitions live→ended: clear DNA banner + reset so
+    // it won't fire again on stale idle readings.
+    if (wasLive && !isLive) {{
+      hideBanner("banner-dna");
+      hideBanner("banner-fp");
+      dnaFetched = false;
+      fpFetched  = false;
+      anomalyData = [];         // clear stale anomaly markers too
+    }}
+    wasLive = isLive;
 
     const badge = document.getElementById("status-badge");
     if (isLive) {{
@@ -709,12 +728,21 @@ async function fetchAndUpdate() {{
       setText("debt-tree",  "—");
     }}
 
-    // D3: collect anomaly watts for chart overlay
+    // D3: anomaly markers — only collect when LIVE so we don't show
+    // stale training anomalies on the current idle chart after session ends.
     const anomList = anom.anomalies || [];
-    anomalyWatts = anomList.map(a => parseFloat(a.power_w)).filter(v => !isNaN(v));
+    if (isLive && anomList.length > 0) {{
+      // Store with time string (last 8 chars of "YYYY-MM-DD HH:MM:SS" = "HH:MM:SS")
+      anomalyData = anomList.map(a => ({{
+        timeStr: a.timestamp ? a.timestamp.slice(-8) : null,
+        watts:   parseFloat(a.power_w) || 0
+      }})).filter(a => a.timeStr);
+    }} else if (!isLive) {{
+      anomalyData = [];  // clear when session has ended
+    }}
     const anomCap = document.getElementById("anomaly-caption");
-    anomCap.textContent = anomList.length > 0
-      ? "⚠️ " + anomList.length + " anomaly event(s) — red × markers on chart."
+    anomCap.textContent = (isLive && anomalyData.length > 0)
+      ? "⚠️ " + anomalyData.length + " anomaly event(s) — red × markers on chart."
       : "";
 
     // ── Power history & chart ─────────────────────────────────
@@ -729,9 +757,10 @@ async function fetchAndUpdate() {{
     // ── Fingerprint table ─────────────────────────────────────
     renderFPTable(fp.runs || []);
 
-    // D4 + D5: fetch DNA match and fingerprint comparison once
-    fetchDNAMatch();
-    fetchFPCompare();
+    // D4: DNA match — only when LIVE and power curve has variance
+    // D5: fingerprint compare — fires once, resets on live→ended
+    fetchDNAMatch(isLive);
+    if (isLive) fetchFPCompare();
 
     // ── Timestamp ─────────────────────────────────────────────
     const ts = new Date().toLocaleTimeString();
