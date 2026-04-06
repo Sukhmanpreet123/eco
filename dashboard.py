@@ -66,44 +66,32 @@ section[data-testid="stSidebar"] [data-testid="stSlider"] [role="slider"] {
     background: #10b981 !important;
 }
 
-/* ── Tabs (Mockup Design) ── */
-[data-testid="stTabs"] {
-    padding-top: 5px !important;
-}
+/* ── Tabs (Simple Green Pill Design) ── */
 [data-testid="stTabs"] [role="tablist"] {
-    background: transparent !important;
-    border: none !important;
-    padding: 0 0 10px 0 !important;
-    gap: 8px !important;
-    margin-bottom: 20px !important;
+    gap: 8px; /* space between tabs */
+    margin-bottom: 24px;
 }
 [data-testid="stTabs"] [role="tab"] {
-    background: transparent !important;
-    border: 1px solid transparent !important;
-    border-radius: 100px !important;
-    color: #94a3b8 !important;
-    font-size: 14px !important;
-    font-weight: 600 !important;
-    padding: 8px 16px !important;
-    min-height: 38px !important;
-    margin-top: 5px !important; /* Forces it down from clipping */
-    transition: all 0.2s ease !important;
+    background-color: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 100px;
+    padding: 8px 16px;
+    color: #94a3b8;
+    font-weight: 600;
+    font-size: 14px;
+    transition: all 0.2s ease;
 }
 [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
-    background: #f8fafc !important; /* White pill for active tab like mockup */
-    border-color: #f8fafc !important;
-    color: #020617 !important; /* Very dark text */
+    background-color: rgba(16,185,129,0.15);
+    border: 1px solid #10b981;
+    color: #10b981;
 }
 [data-testid="stTabs"] [role="tab"]:hover {
-    color: #f1f5f9 !important;
+    color: #f1f5f9;
 }
-[data-testid="stTabs"] [role="tab"][aria-selected="true"]:hover {
-    color: #020617 !important;
-}
-/* Hide tab underline bar */
-[data-testid="stTabs"] [role="tabpanel"] { border: none !important; }
+/* hide the default streamlit bottom border */
+[data-testid="stTabs"] div[data-baseweb="tab-border"] { display: none !important; }
 [data-testid="stTabs"] div[data-baseweb="tab-highlight"] { display: none !important; }
-[data-testid="stTabs"] div[data-baseweb="tab-border"]    { display: none !important; }
 
 /* ── Main content area ── */
 [data-testid="stAppViewContainer"] > section.main {
@@ -111,16 +99,7 @@ section[data-testid="stSidebar"] [data-testid="stSlider"] [role="slider"] {
 }
 .block-container { padding-top: 1.5rem !important; }
 
-/* ── Streamlit widgets in main ── */
-[data-testid="stTextInput"] input,
-[data-testid="stNumberInput"] input,
-[data-testid="stTextArea"] textarea,
-[data-testid="stSelectbox"] > div {
-    background: #1e293b !important;
-    border: 1px solid #334155 !important;
-    color: #f1f5f9 !important;
-    border-radius: 8px !important;
-}
+/* ── Typography ── */
 [data-testid="stMarkdownContainer"] p,
 [data-testid="stMarkdownContainer"] li { color: #94a3b8 !important; }
 
