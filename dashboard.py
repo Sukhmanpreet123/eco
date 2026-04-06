@@ -67,24 +67,24 @@ section[data-testid="stSidebar"] [data-testid="stSlider"] [role="slider"] {
 }
 
 /* ── Tabs ── */
+[data-testid="stTabs"] {
+    padding-top: 10px;
+}
 [data-testid="stTabs"] [role="tablist"] {
     background: transparent !important;
     border: none !important;
-    padding: 0 !important;
-    gap: 10px;
+    padding: 2px 0 6px 0 !important;
+    gap: 8px;
     margin-bottom: 24px;
-    overflow: visible !important;
 }
 [data-testid="stTabs"] [role="tab"] {
     background: #1e293b !important;
     border: 1px solid #334155 !important;
-    border-radius: 100px !important;
+    border-radius: 8px !important;
     color: #94a3b8 !important;
     font-size: 14px !important;
     font-weight: 600 !important;
-    padding: 8px 18px !important;
-    min-height: 38px !important;
-    line-height: normal !important;
+    padding: 8px 16px !important;
     transition: all 0.2s ease !important;
 }
 [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
@@ -122,7 +122,7 @@ section[data-testid="stSidebar"] [data-testid="stSlider"] [role="slider"] {
 
 /* ── Buttons ── */
 [data-testid="stButton"] > button {
-    background: #10b981 !important;
+    background: #059669 !important; /* Darker green for perfect contrast with white text */
     color: #fff !important;
     border: none !important;
     border-radius: 8px !important;
@@ -131,7 +131,7 @@ section[data-testid="stSidebar"] [data-testid="stSlider"] [role="slider"] {
     padding: 8px 18px !important;
     transition: background 0.2s ease !important;
 }
-[data-testid="stButton"] > button:hover { background: #059669 !important; }
+[data-testid="stButton"] > button:hover { background: #047857 !important; }
 
 /* ── Streamlit metrics ── */
 [data-testid="stMetric"] {
@@ -170,12 +170,13 @@ section[data-testid="stSidebar"] [data-testid="stSlider"] [role="slider"] {
 
 /* ── Form submit button ── */
 [data-testid="stFormSubmitButton"] > button {
-    background: #10b981 !important;
+    background: #059669 !important; /* Darker green */
     color: #fff !important;
     border-radius: 8px !important;
     font-weight: 600 !important;
     width: 100% !important;
 }
+[data-testid="stFormSubmitButton"] > button:hover { background: #047857 !important; }
 
 /* ── Headings ── */
 h1,h2,h3 { color: #f1f5f9 !important; font-family: 'Inter', sans-serif !important; }
