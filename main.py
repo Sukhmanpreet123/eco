@@ -243,19 +243,20 @@ def predict_energy(session_id: str):
 
         std_w = float(np.std(y))
 
-        # Skip regression for flat/near-flat signals.
-        # A tiny idle drift (3.8→5.0W) has slope ~0.15W/sample.
-        # Extrapolated 720 steps → +108W, clamped to 3×avg = 14W: misleading.
-        # When std_dev < 1W, the signal is essentially constant → return average.
-        if np.all(y == y[0]) or std_w < 1.0 or len(recent) < 3:
+        # Skip regression when signal has low variance (< 2W std).
+        # Hill-shaped idle signals (startup burst then settle) have std ~1-1.5W —
+        # regression sees a downward tail → predicts negative → was showing 0W.
+        # Any machine being monitored draws at least 2W, so 0W is always wrong.
+        if np.all(y == y[0]) or std_w < 2.0 or len(recent) < 3:
             pred = avg_w
         else:
             # B4: 1 hour = 3600s / 5s = 720 samples ahead
             future_idx = len(recent) + 720
             raw_pred   = float(
                 LinearRegression().fit(X, y).predict([[future_idx]])[0])
-            # Tighten clamp to 2× avg (was 3×) — less misleading on short sessions
-            pred = max(0.0, min(raw_pred, avg_w * 2.0))
+            # Floor: never predict below half the current avg (machine is always on)
+            # Ceiling: 2× current avg (was 3×, tightened to be less alarming)
+            pred = max(avg_w * 0.5, min(raw_pred, avg_w * 2.0))
 
         return {
             "session":       session_id,
