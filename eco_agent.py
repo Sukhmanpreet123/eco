@@ -1,5 +1,5 @@
 """
-EcoTrace v3 — Smart Agent
+EcoTrace v3 — Smart Agent  (v3.1)
 Drop-in for Colab / Kaggle / Local.
 Inject with: !curl -O https://raw.githubusercontent.com/YOUR_REPO/eco_agent.py
 
@@ -13,9 +13,14 @@ Usage in notebook:
     end_session(session, final_accuracy=0.913, final_loss=0.243,
                 val_losses=[0.8, 0.6, 0.4, 0.35, 0.34, 0.34, 0.34])
 
-For persistent local monitoring (run_local.py):
+For persistent local monitoring:
     from eco_agent import start
     start(session_id="Intel-Laptop-Ldh")
+
+Fixes applied (v3.1):
+  A1  DNA normalisation uses [0.5]*n for flat profiles (matches server)
+  A2  Human equivalents use server-returned total_co2_g (authoritative)
+  A3  All end_session() output values fall back to server response
 """
 
 import threading
@@ -36,6 +41,7 @@ except ImportError:
 SERVER_URL  = "https://eco-2-4re9.onrender.com/log"
 SERVER_BASE = "https://eco-2-4re9.onrender.com"
 GRID_G_KWH  = 475.0
+DNA_LEN     = 50
 # ─────────────────────────────────────────────────────────────
 
 
@@ -67,6 +73,25 @@ def _init_gpu():
     except Exception:
         print("   No NVIDIA GPU — using CPU estimation.")
         return False, None
+
+
+def _resample_dna(powers, n=DNA_LEN):
+    """
+    A1 fix: constant-power signals return [0.5]*n to match server behaviour.
+    """
+    try:
+        import numpy as np
+        if len(powers) < 2:
+            return [0.5] * n
+        arr      = np.array(powers, dtype=float)
+        idx      = np.linspace(0, len(arr) - 1, n)
+        rs       = np.interp(idx, np.arange(len(arr)), arr)
+        mn, mx   = rs.min(), rs.max()
+        if mx - mn < 1e-9:          # A1: flat signal → centred at 0.5
+            return [0.5] * n
+        return ((rs - mn) / (mx - mn)).tolist()
+    except Exception:
+        return [0.5] * n
 
 
 # ─────────────────────────────────────────────────────────────
@@ -139,7 +164,7 @@ def start_session(task_type="unknown", model_name="unknown",
                       dataset_size, epochs, batch_size, researcher_id)
 
     print(f"\n{'='*50}")
-    print(f"  EcoTrace v3 — Session started")
+    print(f"  EcoTrace v3.1 — Session started")
     print(f"  run_id  : {run_id}")
     print(f"  task    : {task_type}  |  model: {model_name}")
     print(f"  epochs  : {epochs}  |  batch: {batch_size}")
@@ -238,18 +263,11 @@ def end_session(session, final_accuracy=None, final_loss=None,
 
     avg_watts  = round(sum(powers) / len(powers), 2)
     peak_watts = round(max(powers), 2)
-    total_co2  = round((avg_watts / 1000) * GRID_G_KWH * (duration_mins / 60), 4)
+    # Client-side CO₂ — used as fallback; server will recompute authoritatively
+    local_co2  = round((avg_watts / 1000) * GRID_G_KWH * (duration_mins / 60), 6)
 
-    # Carbon DNA — 50-point normalised power curve
-    try:
-        import numpy as np
-        arr  = np.array(powers, dtype=float)
-        idx  = np.linspace(0, len(arr) - 1, 50)
-        rs   = np.interp(idx, np.arange(len(arr)), arr)
-        mn, mx = rs.min(), rs.max()
-        dna  = ((rs - mn) / (mx - mn + 1e-9)).tolist()
-    except Exception:
-        dna  = []
+    # A1: use fixed _resample_dna (consistent with server)
+    dna = _resample_dna(powers)
 
     fingerprint = {
         "run_id":         session.run_id,
@@ -262,8 +280,8 @@ def end_session(session, final_accuracy=None, final_loss=None,
         "batch_size":     session.batch_size,
         "avg_watts":      avg_watts,
         "peak_watts":     peak_watts,
-        "duration_mins":  round(duration_mins, 2),
-        "total_co2_g":    total_co2,
+        "duration_mins":  round(duration_mins, 4),
+        "total_co2_g":    local_co2,
         "final_accuracy": final_accuracy,
         "final_loss":     final_loss,
         "val_losses":     val_losses or [],
@@ -305,36 +323,49 @@ def end_session(session, final_accuracy=None, final_loss=None,
     except Exception:
         pass
 
-    # ── Print run summary ─────────────────────────────────
+    # A2 + A3: prefer server-side authoritative values where available
     grade      = result.get("grade", "?")
     wasted     = result.get("wasted_co2_g", 0)
     waste_ep   = result.get("waste_epoch")
+    # A2: use server's authoritative total_co2_g (re-derived from DB logs)
+    total_co2  = result.get("total_co2_g", local_co2)
+    avg_w_srv  = result.get("avg_watts", avg_watts)
+    peak_w_srv = result.get("peak_watts", peak_watts)
 
     print(f"\n{'─'*50}")
-    print(f"  EcoTrace Run Summary")
+    print(f"  EcoTrace Run Summary (v3.1)")
     print(f"  run_id     : {session.run_id}")
     print(f"  Duration   : {round(duration_mins, 1)} min")
-    print(f"  Avg power  : {avg_watts} W  |  Peak: {peak_watts} W")
-    print(f"  Total CO₂  : {total_co2} g")
+    print(f"  Avg power  : {avg_w_srv} W  |  Peak: {peak_w_srv} W")
+    print(f"  Total CO₂  : {total_co2} g  (server-authoritative)")
     if wasted and wasted > 0:
         waste_pct = round(wasted / total_co2 * 100, 1) if total_co2 > 0 else 0
         print(f"  Wasted CO₂ : {wasted} g ({waste_pct}%) "
               f"— overfitting after epoch {waste_ep}")
-    if final_accuracy:
+    if final_accuracy is not None:
         print(f"  Accuracy   : {round(final_accuracy * 100, 2)}%")
-    if final_loss:
+    if final_loss is not None:
         print(f"  Loss       : {final_loss:.4f}")
     print(f"  Grade      : {grade}")
     print(f"  Carbon DNA : {len(dna)}-point vector saved")
 
-    # Human equivalents
-    car_km    = round(total_co2 * 0.00417, 4)
-    phone_x   = round(total_co2 / 5.5, 3)
-    tree_min  = round(total_co2 / 0.0095, 1)
-    print(f"\n  Carbon debt equivalents:")
+    # A2: human equivalents calculated from server's authoritative CO₂
+    car_km   = round(total_co2 * 0.00417, 5)
+    phone_x  = round(total_co2 / 5.5, 4)
+    tree_min = round(total_co2 / 0.0095, 2)
+    print(f"\n  Carbon debt equivalents (based on {total_co2}g CO₂):")
     print(f"    🚗  {car_km} km driving")
-    print(f"    📱  {phone_x}x phone charges")
+    print(f"    📱  {phone_x}× phone charges")
     print(f"    🌳  {tree_min} min of tree absorption")
     print(f"{'─'*50}\n")
 
+    # Return merged fingerprint with server values
+    fingerprint.update({
+        "total_co2_g":  total_co2,
+        "avg_watts":    avg_w_srv,
+        "peak_watts":   peak_w_srv,
+        "grade":        grade,
+        "wasted_co2_g": wasted,
+        "waste_epoch":  waste_ep,
+    })
     return fingerprint

@@ -1,11 +1,18 @@
 """
-EcoTrace v3 — Zero-Flicker Dashboard
+EcoTrace v3 — Zero-Flicker Dashboard  (v3.1)
 
 The live monitor tab uses pure JavaScript fetch() to update numbers
-in place every 5 seconds. Streamlit never reruns for live data.
-The page stays completely solid — no fade, no flash, no transparency.
-Only the non-live tabs (History, SLA, Leaderboard, Audit, Behavior)
-use normal Streamlit rendering with manual Refresh buttons.
+in place every 5 seconds.  Streamlit never reruns for live data.
+
+Fixes applied (v3.1):
+  D1  Session CO₂ uses server pred.samples (not local sampleCount that resets on refresh)
+  D2  Carbon debt hidden when CO₂ ≤ 0.001 g
+  D3  Anomaly X markers overlaid on live heartbeat chart
+  D4  banner-dna populated by /dna/match call in JS
+  D5  banner-fp populated by /fingerprint/compare call in JS
+  D6  Grade chart colours mapped to labels, not fixed position
+  D7  Power delta (Δ vs prev reading) shown in delta-power
+  D8  components.html height 1100 to fit all panels comfortably
 """
 
 import streamlit as st
@@ -26,7 +33,7 @@ st.set_page_config(
     page_icon="🌱",
 )
 
-# ── Global CSS — no opacity transitions, no fade ──────────────
+# ── Global CSS ────────────────────────────────────────────────
 st.markdown("""
 <style>
 /* Remove ALL Streamlit fade animations */
@@ -65,6 +72,16 @@ def fmt_val(val, unit="", decimals=2):
         return f"{round(v, decimals)} {unit}".strip()
     except Exception:
         return str(val)
+
+
+# D6 helper: map grade letters to colours
+GRADE_COLOURS = {
+    "A": "#2ecc71",
+    "B": "#27ae60",
+    "C": "#f39c12",
+    "D": "#e67e22",
+    "F": "#e74c3c",
+}
 
 
 # ── SESSION STATE ─────────────────────────────────────────────
@@ -117,10 +134,18 @@ with st.sidebar:
             st.info("No past runs to estimate from yet.")
 
     st.markdown("---")
-    fp_all      = api("/fingerprint/all")
-    fp_list     = fp_all.get("runs", []) or []
-    proj_co2    = sum(r.get("total_co2_g")  or 0 for r in fp_list)
-    proj_wasted = sum(r.get("wasted_co2_g") or 0 for r in fp_list)
+    # D7: cache project totals for 30 s so it doesn't hammer the server every render
+    @st.cache_data(ttl=30)
+    def _project_totals():
+        fp_all  = api("/fingerprint/all")
+        fp_list = fp_all.get("runs", []) or []
+        return (
+            fp_list,
+            sum(r.get("total_co2_g")  or 0 for r in fp_list),
+            sum(r.get("wasted_co2_g") or 0 for r in fp_list),
+        )
+
+    fp_list, proj_co2, proj_wasted = _project_totals()
     st.metric("Project total CO₂",  fmt_val(proj_co2,    "g"))
     st.metric("Project wasted CO₂", fmt_val(proj_wasted, "g"))
     st.caption(f"{len(fp_list)} completed run(s)")
@@ -140,10 +165,6 @@ with tab_live:
     st.title("🌱 EcoTrace — Real-Time AI Carbon Governance")
     st.caption(f"Monitoring: **{target}** · Updates every 5s in place · No page reload")
 
-    # The entire live section is one HTML component.
-    # JavaScript fetches data from the Render API every 5 seconds
-    # and updates only the specific DOM elements that changed.
-    # Streamlit is completely uninvolved in the refresh cycle.
     live_html = f"""
 <style>
   :root {{
@@ -250,7 +271,7 @@ with tab_live:
   .grid-badge.yellow {{ background:#fff3cd; color:#856404; }}
   .grid-badge.green  {{ background:#d4edda; color:#155724; }}
 
-  /* Simple line chart via canvas */
+  /* Canvas chart */
   canvas {{ width: 100% !important; height: 200px !important; }}
 
   .section-title {{
@@ -315,21 +336,23 @@ with tab_live:
   </div>
   <div>
     <div class="section-title">🌍 Carbon debt</div>
-    <div class="debt-grid">
-      <div class="debt-card">
-        <div class="debt-icon">🚗</div>
-        <div class="debt-val" id="debt-car">—</div>
-        <div class="debt-desc">km petrol car</div>
-      </div>
-      <div class="debt-card">
-        <div class="debt-icon">📱</div>
-        <div class="debt-val" id="debt-phone">—</div>
-        <div class="debt-desc">phone charges</div>
-      </div>
-      <div class="debt-card">
-        <div class="debt-icon">🌳</div>
-        <div class="debt-val" id="debt-tree">—</div>
-        <div class="debt-desc">tree absorption</div>
+    <div id="debt-section">
+      <div class="debt-grid">
+        <div class="debt-card">
+          <div class="debt-icon">🚗</div>
+          <div class="debt-val" id="debt-car">—</div>
+          <div class="debt-desc">km petrol car</div>
+        </div>
+        <div class="debt-card">
+          <div class="debt-icon">📱</div>
+          <div class="debt-val" id="debt-phone">—</div>
+          <div class="debt-desc">phone charges</div>
+        </div>
+        <div class="debt-card">
+          <div class="debt-icon">🌳</div>
+          <div class="debt-val" id="debt-tree">—</div>
+          <div class="debt-desc">tree absorption</div>
+        </div>
       </div>
     </div>
   </div>
@@ -366,10 +389,11 @@ const INTERVAL = 5000;  // 5 seconds
 
 // ── State ───────────────────────────────────────────────────
 let powerHistory   = [];   // {{time, watts}}
-let totalReadings  = 0;
-let sessionCO2     = 0;
-let chartCtx       = null;
-let sampleCount    = 0;
+let prevWatts      = null; // D7: track previous reading for delta
+let anomalyTimes   = [];   // D3: list of timestamps with anomalies
+let anomalyWatts   = [];   // D3: watts at anomaly timestamps
+let dnaFetched     = false;
+let fpFetched      = false;
 
 // ── Helpers ─────────────────────────────────────────────────
 function fmt(val, unit="", dec=2) {{
@@ -396,12 +420,12 @@ function setText(id, val) {{
   if (el) el.textContent = val;
 }}
 
-// ── Draw chart (pure canvas, no library needed) ─────────────
+// ── Draw chart (canvas — no dependency) ─────────────────────
 function drawChart() {{
   const canvas = document.getElementById("powerChart");
   if (!canvas) return;
   const ctx    = canvas.getContext("2d");
-  const W = canvas.width  = canvas.offsetWidth  || 500;
+  const W = canvas.width  = canvas.offsetWidth || 500;
   const H = canvas.height = 200;
   ctx.clearRect(0, 0, W, H);
 
@@ -448,6 +472,28 @@ function drawChart() {{
     ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
   }});
 
+  // D3: anomaly X markers — red crosses at anomaly positions
+  if (anomalyWatts.length > 0 && powerHistory.length > 1) {{
+    ctx.strokeStyle = "#e74c3c";
+    ctx.lineWidth   = 2;
+    anomalyWatts.forEach(aw => {{
+      // Find the closest power history point by watt value
+      let closestIdx = 0;
+      let closestDiff = Infinity;
+      powerHistory.forEach((p, i) => {{
+        const diff = Math.abs(p.watts - aw);
+        if (diff < closestDiff) {{ closestDiff = diff; closestIdx = i; }}
+      }});
+      const x = padL + (closestIdx / (powerHistory.length - 1)) * chartW;
+      const y = padT + chartH - ((aw - minW) / rangeW) * chartH;
+      const r = 6;
+      ctx.beginPath();
+      ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r);
+      ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r);
+      ctx.stroke();
+    }});
+  }}
+
   // X-axis labels (show every 5th)
   ctx.fillStyle   = "#888";
   ctx.font        = "10px sans-serif";
@@ -476,10 +522,10 @@ function renderFPTable(runs) {{
       <th style="padding:4px 6px">Accuracy</th>
       <th style="padding:4px 6px">Grade</th>
     </tr>`;
+  const gradeColors = {{A:"#28a745",B:"#5cb85c",C:"#f0ad4e",D:"#e67e22",F:"#e74c3c"}};
   runs.slice(0, 5).forEach(r => {{
-    const grade = r.efficiency_grade || "?";
-    const gradeColor = {{A:"#28a745",B:"#5cb85c",C:"#f0ad4e",
-                         D:"#e67e22",F:"#e74c3c"}}[grade] || "#888";
+    const grade      = r.efficiency_grade || "?";
+    const gradeColor = gradeColors[grade] || "#888";
     html += `<tr style="border-top:1px solid #eee">
       <td style="padding:4px 6px">${{r.model_name||"—"}}</td>
       <td style="padding:4px 6px">${{r.epochs||"—"}}</td>
@@ -494,10 +540,50 @@ function renderFPTable(runs) {{
   document.getElementById("fp-table").innerHTML = html;
 }}
 
+// ── One-shot DNA match (called when enough history) ──────────
+// D4: call /dna/match and show result in banner-dna
+async function fetchDNAMatch() {{
+  if (dnaFetched || powerHistory.length < 5) return;
+  try {{
+    const powers = powerHistory.map(p => p.watts);
+    const r = await fetch(SERVER + "/dna/match", {{
+      method: "POST",
+      headers: {{"Content-Type": "application/json"}},
+      body: JSON.stringify({{powers}})
+    }});
+    const d = await r.json();
+    if (d.prediction) {{
+      setBanner("banner-dna", "🧬 " + d.prediction, "blue");
+      dnaFetched = true;  // show once per page load
+    }}
+  }} catch(e) {{}}
+}}
+
+// ── One-shot fingerprint comparison ─────────────────────────
+// D5: call /fingerprint/compare and show in banner-fp
+async function fetchFPCompare() {{
+  if (fpFetched) return;
+  try {{
+    const r = await fetch(`${{SERVER}}/fingerprint/compare?session_id=${{SESSION}}`);
+    const d = await r.json();
+    const similar = d.similar_runs || [];
+    if (similar.length > 0) {{
+      const best = similar[0];
+      const acc  = best.final_accuracy ? (best.final_accuracy*100).toFixed(1)+"%" : "?";
+      setBanner("banner-fp",
+        `🔬 Most similar past run: ${{best.model_name||"?"}} — `+
+        `CO₂: ${{fmt(best.total_co2_g,"g",4)}} | Acc: ${{acc}} | `+
+        `Grade: ${{best.efficiency_grade||"?"}} | `+
+        `Similarity: ${{best.similarity_score||"?"}}`
+        , "blue");
+      fpFetched = true;
+    }}
+  }} catch(e) {{}}
+}}
+
 // ── Main fetch loop ──────────────────────────────────────────
 async function fetchAndUpdate() {{
   try {{
-    // Parallel fetch all endpoints
     const [predResp, budgetResp, shapResp, fpResp, anomResp, activeResp] =
       await Promise.all([
         fetch(`${{SERVER}}/predict?session_id=${{SESSION}}`),
@@ -534,32 +620,46 @@ async function fetchAndUpdate() {{
     const currW = parseFloat(pred.current_avg_w) || 0;
     const predW = parseFloat(pred.predicted_w)   || 0;
 
-    setText("val-power",  fmt(currW, "W", 2));
-    setText("val-pred",   fmt(predW, "W", 2));
+    setText("val-power", fmt(currW, "W", 2));
+    setText("val-pred",  fmt(predW, "W", 2));
+
+    // D7: power delta vs previous reading
+    const deltaPowerEl = document.getElementById("delta-power");
+    if (prevWatts !== null && currW > 0) {{
+      const delta = currW - prevWatts;
+      const sign  = delta >= 0 ? "+" : "";
+      deltaPowerEl.textContent = sign + delta.toFixed(2) + " W since last tick";
+      deltaPowerEl.className   = "metric-delta " + (delta > 0 ? "bad" : "good");
+    }} else {{
+      deltaPowerEl.textContent = "Tracking power draw…";
+      deltaPowerEl.className   = "metric-delta muted";
+    }}
+    if (currW > 0) prevWatts = currW;
 
     // ── Carbon rate ───────────────────────────────────────────
     const carbonGhr = parseFloat(pred.carbon_g_hr) || 0;
     setText("val-carbon", fmt(carbonGhr, "g/hr", 2));
     const carbDelta = document.getElementById("delta-carbon");
     if (carbonGhr > 5) {{
-      carbDelta.textContent = "↑ above avg";
+      carbDelta.textContent = "↑ above average";
       carbDelta.className   = "metric-delta bad";
     }} else {{
-      carbDelta.textContent = "↑ normal";
+      carbDelta.textContent = "↑ normal range";
       carbDelta.className   = "metric-delta good";
     }}
 
-    // ── Session CO₂ accumulation ──────────────────────────────
-    sampleCount++;
-    const elapsedHrs = sampleCount * 5 / 3600;
-    sessionCO2 = (currW / 1000) * {GRID_FALLBACK} * elapsedHrs;
+    // D1 fix: derive session CO₂ from server samples count (persists across refresh)
+    // pred.samples = total DB readings for this session (always growing, never resets)
+    const serverSamples = parseInt(pred.samples) || 0;
+    const elapsedHrs    = serverSamples * 5 / 3600;
+    const sessionCO2    = (currW / 1000) * GRID * elapsedHrs;
     setText("val-co2", fmt(sessionCO2, "g", 4));
 
     // ── Efficiency vs best ────────────────────────────────────
-    const bestCO2   = parseFloat(budget.best_past_co2);
-    const projCO2   = parseFloat(budget.projected_co2) || 0;
-    const effEl     = document.getElementById("val-eff");
-    const effDelta  = document.getElementById("delta-eff");
+    const bestCO2  = parseFloat(budget.best_past_co2);
+    const projCO2  = parseFloat(budget.projected_co2) || 0;
+    const effEl    = document.getElementById("val-eff");
+    const effDelta = document.getElementById("delta-eff");
     if (!isNaN(bestCO2) && bestCO2 >= 1.0 && projCO2 >= 1.0) {{
       let dp = ((projCO2 - bestCO2) / bestCO2 * 100);
       dp = Math.max(-999, Math.min(999, dp));
@@ -589,23 +689,32 @@ async function fetchAndUpdate() {{
     if (!isNaN(fairCO2) && !isNaN(savedCO2) && savedCO2 > 0) {{
       setBanner("banner-shapley",
         "⚖️ Shapley attribution: your fair CO₂ share = " +
-        fairCO2.toFixed(4) + "g (saved " + savedCO2.toFixed(4) +
+        fairCO2.toFixed(6) + "g (saved " + savedCO2.toFixed(6) +
         "g vs naive attribution)", "green");
     }} else {{
       hideBanner("banner-shapley");
     }}
 
-    // ── Carbon debt ───────────────────────────────────────────
-    const totalG = Math.max(sessionCO2, 0.001);
-    setText("debt-car",   fmt(totalG * 0.00417, "km", 3));
-    setText("debt-phone", fmt(totalG / 5.5,     "×",  2));
-    setText("debt-tree",  fmt(totalG / 0.0095,  "min",1));
+    // D2: only show carbon debt when CO₂ is meaningfully non-zero
+    const debtSection = document.getElementById("debt-section");
+    if (sessionCO2 > 0.001) {{
+      debtSection.style.opacity = "1";
+      setText("debt-car",   fmt(sessionCO2 * 0.00417, "km",  3));
+      setText("debt-phone", fmt(sessionCO2 / 5.5,     "×",   2));
+      setText("debt-tree",  fmt(sessionCO2 / 0.0095,  "min", 1));
+    }} else {{
+      debtSection.style.opacity = "0.3";
+      setText("debt-car",   "—");
+      setText("debt-phone", "—");
+      setText("debt-tree",  "—");
+    }}
 
-    // ── Anomaly caption ───────────────────────────────────────
+    // D3: collect anomaly watts for chart overlay
     const anomList = anom.anomalies || [];
-    const anomCap  = document.getElementById("anomaly-caption");
+    anomalyWatts = anomList.map(a => parseFloat(a.power_w)).filter(v => !isNaN(v));
+    const anomCap = document.getElementById("anomaly-caption");
     anomCap.textContent = anomList.length > 0
-      ? "⚠️ " + anomList.length + " anomaly event(s) — wasted carbon logged."
+      ? "⚠️ " + anomList.length + " anomaly event(s) — red × markers on chart."
       : "";
 
     // ── Power history & chart ─────────────────────────────────
@@ -620,6 +729,10 @@ async function fetchAndUpdate() {{
     // ── Fingerprint table ─────────────────────────────────────
     renderFPTable(fp.runs || []);
 
+    // D4 + D5: fetch DNA match and fingerprint comparison once
+    fetchDNAMatch();
+    fetchFPCompare();
+
     // ── Timestamp ─────────────────────────────────────────────
     const ts = new Date().toLocaleTimeString();
     document.getElementById("last-updated").textContent =
@@ -632,18 +745,13 @@ async function fetchAndUpdate() {{
 }}
 
 // ── Start immediately, then repeat every 5s ──────────────────
-// This is a plain setInterval — no page reload, no rerun,
-// no Streamlit involvement. Only the text inside the DOM
-// elements above changes.
 fetchAndUpdate();
-setInterval(fetchAndUpdate, {REFRESH_MS});
+setInterval(fetchAndUpdate, 5000);
 </script>
 """
 
-    # REFRESH_MS is a Python variable — substitute it
-    live_html = live_html.replace("{REFRESH_MS}", "5000")
-
-    components.html(live_html, height=900, scrolling=True)
+    # D8: height increased to 1100 to accommodate all panels
+    components.html(live_html, height=1100, scrolling=True)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -652,34 +760,55 @@ setInterval(fetchAndUpdate, {REFRESH_MS});
 with tab_history:
     st.header("🔬 Run fingerprint history")
     if st.button("🔄 Refresh"):
+        st.cache_data.clear()
         st.rerun()
-    if fp_list:
-        fp_df = pd.DataFrame(fp_list)
+
+    @st.cache_data(ttl=60)
+    def _load_fp_history():
+        return api("/fingerprint/all").get("runs", []) or []
+
+    hist_list = _load_fp_history()
+
+    if hist_list:
+        fp_df = pd.DataFrame(hist_list)
         st.dataframe(fp_df, use_container_width=True)
 
+        # D6: map grade colours explicitly by label instead of fixed array
         if "efficiency_grade" in fp_df.columns:
             grade_counts = fp_df["efficiency_grade"].value_counts()
+            bar_colours  = [GRADE_COLOURS.get(g, "#888")
+                            for g in grade_counts.index.tolist()]
             fig_g = go.Figure(go.Bar(
                 x=grade_counts.index.tolist(),
                 y=grade_counts.values.tolist(),
-                marker_color=["#2ecc71","#27ae60",
-                              "#f39c12","#e67e22","#e74c3c"]))
-            fig_g.update_layout(title="Efficiency grade distribution",
-                                template="plotly_dark", height=250)
+                marker_color=bar_colours,
+                text=grade_counts.values.tolist(),
+                textposition="auto"))
+            fig_g.update_layout(
+                title="Efficiency grade distribution",
+                xaxis_title="Grade",
+                yaxis_title="Count",
+                template="plotly_dark", height=280)
             st.plotly_chart(fig_g, use_container_width=True)
 
         if "timestamp" in fp_df.columns and "total_co2_g" in fp_df.columns:
+            fp_sorted = fp_df.sort_values("timestamp")
             fig_t = go.Figure(go.Scatter(
-                x=fp_df["timestamp"], y=fp_df["total_co2_g"],
+                x=fp_sorted["timestamp"], y=fp_sorted["total_co2_g"],
                 mode="lines+markers", line=dict(color="#3498db"),
-                name="CO₂ per run"))
-            if "wasted_co2_g" in fp_df.columns:
+                name="CO₂ per run",
+                hovertemplate="<b>%{x}</b><br>CO₂: %{y:.4f} g<extra></extra>"))
+            if "wasted_co2_g" in fp_sorted.columns:
                 fig_t.add_trace(go.Bar(
-                    x=fp_df["timestamp"], y=fp_df["wasted_co2_g"],
+                    x=fp_sorted["timestamp"], y=fp_sorted["wasted_co2_g"],
                     name="Wasted CO₂",
-                    marker_color="rgba(231,76,60,0.5)"))
-            fig_t.update_layout(title="CO₂ per run over time",
-                                template="plotly_dark", height=300)
+                    marker_color="rgba(231,76,60,0.5)",
+                    hovertemplate="<b>%{x}</b><br>Wasted: %{y:.4f} g<extra></extra>"))
+            fig_t.update_layout(
+                title="CO₂ per run over time",
+                yaxis_title="CO₂ (g)",
+                template="plotly_dark", height=320,
+                barmode="overlay")
             st.plotly_chart(fig_t, use_container_width=True)
     else:
         st.info("No completed runs yet.")
@@ -694,16 +823,16 @@ with tab_sla:
 
     with st.form("sla_form"):
         sla_model   = st.text_input("Model name", "ResNet-50")
-        sla_max_co2 = st.number_input("Max CO₂ (g)", 1.0, 10000.0, 50.0, step=1.0)
+        sla_max_co2 = st.number_input("Max CO₂ (g)", 0.0, 10000.0, 50.0, step=1.0)
         sla_min_acc = st.number_input("Min accuracy (0–1)", 0.0, 1.0, 0.90, step=0.01)
         if st.form_submit_button("Save SLA"):
             r = api("/sla/set", method="POST",
                     json_body={"model_name":   sla_model,
                                "max_co2_g":    sla_max_co2,
                                "min_accuracy": sla_min_acc})
-            st.success(f"SLA saved for {sla_model}") \
-                if r.get("status") == "SLA saved" \
-                else st.error("Failed to save SLA.")
+            (st.success(f"SLA saved for {sla_model}")
+             if r.get("status") == "SLA saved"
+             else st.error("Failed to save SLA."))
 
     st.subheader("Active SLAs")
     slas = api("/sla/all").get("slas", []) or []
@@ -728,7 +857,9 @@ with tab_lb:
         fig_lb = go.Figure(go.Bar(
             x=[r["researcher_id"] for r in board],
             y=[r["efficiency_pct"] for r in board],
-            marker_color="#2ecc71"))
+            marker_color="#2ecc71",
+            text=[f"{r['efficiency_pct']}%" for r in board],
+            textposition="auto"))
         fig_lb.update_layout(
             title="Efficiency % by researcher",
             yaxis_title="Efficiency %",
@@ -759,7 +890,12 @@ with tab_audit:
         st.info("Audit chain status unknown.")
 
     audit_sid  = st.text_input(
-        "Filter by session ID (leave blank for last 100)")
+        "Filter by session ID (leave blank for last 100 entries)")
+    if audit_sid:
+        st.caption(f"Showing audit entries for session: {audit_sid}")
+    else:
+        st.caption("Showing last 100 audit entries across all sessions.")
+
     audit_data = api("/audit",
                      params={"session_id": audit_sid}
                      if audit_sid else {})
