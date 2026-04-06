@@ -301,13 +301,22 @@ async def save_fingerprint(request: Request):
                 no_improve += 1
                 if no_improve >= patience:
                     break
-        waste_start = best_ep + patience
-        if waste_start < len(powers):
-            wp           = powers[waste_start:]
+        waste_start = best_ep + patience   # epoch number (e.g. 8 of 10)
+
+        # CRITICAL FIX: map epoch index → power reading index proportionally.
+        # powers[] has one reading per 5s; val_losses[] has one per epoch.
+        # They are completely different lengths!
+        # epoch 8 of 10 epochs → reading at 80% of total readings.
+        n_epochs    = len(val_losses)
+        n_readings  = len(powers)
+        waste_start_idx = int(waste_start / n_epochs * n_readings)
+
+        if 0 < waste_start_idx < n_readings:
+            wp           = powers[waste_start_idx:]
             wasted_co2_g = round(
                 (float(np.mean(wp)) / 1000) * GRID_INTENSITY
                 * (len(wp) * 5 / 3600), 6)
-            waste_epoch  = waste_start
+            waste_epoch  = waste_start   # keep as epoch number for display
 
     grade = compute_grade(total_co2_g, wasted_co2_g, fp.get("final_accuracy"))
 
