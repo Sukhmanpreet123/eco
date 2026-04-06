@@ -763,11 +763,10 @@ with tab_history:
         st.cache_data.clear()
         st.rerun()
 
-    @st.cache_data(ttl=60)
-    def _load_fp_history():
-        return api("/fingerprint/all").get("runs", []) or []
-
-    hist_list = _load_fp_history()
+    # Fetch directly — no cache. The Refresh button gives user control.
+    # Caching inside a tab block causes stale results because the function
+    # object is recreated on every Streamlit rerun, defeating cache.clear().
+    hist_list = api("/fingerprint/all").get("runs", []) or []
 
     if hist_list:
         fp_df = pd.DataFrame(hist_list)
