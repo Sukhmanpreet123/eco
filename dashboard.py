@@ -68,30 +68,33 @@ section[data-testid="stSidebar"] [data-testid="stSlider"] [role="slider"] {
 
 /* ── Tabs ── */
 [data-testid="stTabs"] [role="tablist"] {
-    background: #1e293b;
-    border-radius: 12px;
-    padding: 4px;
-    gap: 4px;
-    border: 1px solid #334155;
-    margin-bottom: 20px;
-}
-[data-testid="stTabs"] [role="tab"] {
     background: transparent !important;
     border: none !important;
-    border-radius: 8px !important;
+    padding: 0 !important;
+    gap: 10px;
+    margin-bottom: 24px;
+    overflow: visible !important;
+}
+[data-testid="stTabs"] [role="tab"] {
+    background: #1e293b !important;
+    border: 1px solid #334155 !important;
+    border-radius: 100px !important;
     color: #94a3b8 !important;
-    font-size: 13px !important;
-    font-weight: 500 !important;
-    padding: 8px 14px !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    padding: 8px 18px !important;
+    min-height: 38px !important;
+    line-height: normal !important;
     transition: all 0.2s ease !important;
 }
 [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
-    background: #10b981 !important;
-    color: #fff !important;
+    background: rgba(16,185,129,0.15) !important;
+    border-color: #10b981 !important;
+    color: #10b981 !important;
 }
 [data-testid="stTabs"] [role="tab"]:hover {
-    background: #1e3a2f !important;
-    color: #10b981 !important;
+    color: #f1f5f9 !important;
+    border-color: #475569 !important;
 }
 /* Hide tab underline bar */
 [data-testid="stTabs"] [role="tabpanel"] { border: none !important; }
