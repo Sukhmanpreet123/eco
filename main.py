@@ -241,14 +241,21 @@ def predict_energy(session_id: str):
         y      = recent["power_w"].values
         avg_w  = float(y.mean())
 
-        if np.all(y == y[0]) or len(recent) < 3:
+        std_w = float(np.std(y))
+
+        # Skip regression for flat/near-flat signals.
+        # A tiny idle drift (3.8→5.0W) has slope ~0.15W/sample.
+        # Extrapolated 720 steps → +108W, clamped to 3×avg = 14W: misleading.
+        # When std_dev < 1W, the signal is essentially constant → return average.
+        if np.all(y == y[0]) or std_w < 1.0 or len(recent) < 3:
             pred = avg_w
         else:
             # B4: 1 hour = 3600s / 5s = 720 samples ahead
             future_idx = len(recent) + 720
             raw_pred   = float(
                 LinearRegression().fit(X, y).predict([[future_idx]])[0])
-            pred = max(0.0, min(raw_pred, avg_w * 3.0))
+            # Tighten clamp to 2× avg (was 3×) — less misleading on short sessions
+            pred = max(0.0, min(raw_pred, avg_w * 2.0))
 
         return {
             "session":       session_id,
