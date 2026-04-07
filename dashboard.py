@@ -658,18 +658,17 @@ function renderFPTable(runs) {{
 
 async function fetchDNAMatch(live) {{
   if (!live) {{ hideBanner("banner-dna"); return; }}
-  if (dnaFetched || powerHistory.length < 10) return;
+  if (powerHistory.length < 10) return;
   const watts=powerHistory.map(p=>p.watts);
   if (Math.max(...watts)-Math.min(...watts) < 2.0) return;
   try {{
     const r = await fetch(SERVER+"/dna/match", {{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{powers:watts}})}});
     const d = await r.json();
-    if (d.prediction) {{ setBanner("banner-dna","🧬 "+d.prediction,"blue"); dnaFetched=true; }}
+    if (d.prediction) {{ setBanner("banner-dna","🧬 "+d.prediction,"blue"); }}
   }} catch(e) {{}}
 }}
 
 async function fetchFPCompare() {{
-  if (fpFetched) return;
   try {{
     const r = await fetch(`${{SERVER}}/fingerprint/compare?session_id=${{SESSION}}`);
     const d = await r.json();
@@ -677,8 +676,7 @@ async function fetchFPCompare() {{
     if (similar.length>0) {{
       const best=similar[0];
       const acc=best.final_accuracy?(best.final_accuracy*100).toFixed(1)+"%":"?";
-      setBanner("banner-fp",`🔬 Most similar past run: ${{best.model_name||"?"}} — CO₂: ${{fmt(best.total_co2_g,"g",4)}} | Acc: ${{acc}} | Grade: ${{best.efficiency_grade||"?"}} | Similarity: ${{best.similarity_score||"?"}}`, "blue");
-      fpFetched=true;
+      setBanner("banner-fp",`🔬 Live Match: ${{best.model_name||"?"}} — CO₂: ${{fmt(best.total_co2_g,"g",4)}} | Acc: ${{acc}} | Grade: ${{best.efficiency_grade||"?"}} | Similarity: ${{best.similarity_score||"?"}}`, "blue");
     }}
   }} catch(e) {{}}
 }}
