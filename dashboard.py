@@ -401,16 +401,20 @@ canvas {{ width:100% !important; height:200px !important; }}
 .debt-card {{
   background:var(--card); border:1px solid var(--border);
   border-radius:12px; padding:14px; text-align:center;
+  height: 200px;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
 }}
-.debt-icon {{ font-size:22px; margin-bottom:4px; }}
-.debt-val  {{ font-size:18px; font-weight:700; color:var(--text); margin:4px 0 2px; }}
-.debt-desc {{ font-size:11px; color:var(--muted); }}
+.debt-icon {{ font-size:32px; margin-bottom:12px; }}
+.debt-val  {{ font-size:20px; font-weight:700; color:var(--text); margin:4px 0 2px; }}
+.debt-desc {{ font-size:12px; color:var(--muted); }}
 
 /* Bottom grid */
 .bottom-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }}
 .panel {{
   background:var(--card); border:1px solid var(--border);
   border-radius:14px; padding:16px 18px;
+  height: 100%;
+  display: flex; flex-direction: column; justify-content: center;
 }}
 .panel h4  {{ margin:0 0 12px; font-size:13px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; }}
 
