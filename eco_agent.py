@@ -55,8 +55,12 @@ def _get_power(handle=None, has_gpu=False):
             pass
     try:
         import psutil
-        cpu_pct = psutil.cpu_percent(interval=0.5)
-        return max((cpu_pct / 100) * 28.0, 2.0)   # i5-1135G7 TDP, 2W floor
+        import os
+        # Colab Docker leak fix: don't use global cpu_percent() as it reads physical host.
+        # Instead, isolate the specific Python Jupyter process and normalize by core count.
+        p = psutil.Process(os.getpid())
+        cpu_pct = p.cpu_percent(interval=0.5) / (psutil.cpu_count() or 1)
+        return max((cpu_pct / 100.0) * 28.0, 2.0)   # i5-1135G7 TDP, 2W floor
     except Exception:
         return 12.5   # absolute last resort
 
