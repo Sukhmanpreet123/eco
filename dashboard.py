@@ -97,7 +97,7 @@ section[data-testid="stSidebar"] [data-testid="stSlider"] [role="slider"] {
 [data-testid="stAppViewContainer"] > section.main {
     background: #0f172a !important;
 }
-.block-container { padding-top: 1.5rem !important; }
+.block-container { padding-top: 4.0rem !important; }
 
 /* ── Typography ── */
 [data-testid="stMarkdownContainer"] p,
